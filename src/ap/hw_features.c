@@ -1014,14 +1014,32 @@ static int hostapd_is_usable_chans(struct hostapd_iface *iface)
 }
 
 
-static void hostapd_determine_mode(struct hostapd_iface *iface)
+static bool skip_mode(struct hostapd_iface *iface,
+		      struct hostapd_hw_modes *mode)
+{
+	int chan;
+
+	if (iface->freq > 0 && !hw_mode_get_channel(mode, iface->freq, &chan))
+		return true;
+
+	if (is_6ghz_op_class(iface->conf->op_class) && iface->freq == 0 &&
+	    (mode->mode != HOSTAPD_MODE_IEEE80211A ||
+	     mode->num_channels == 0 ||
+	     !is_6ghz_freq(mode->channels[0].freq)))
+		return true;
+
+	return false;
+}
+
+
+int hostapd_determine_mode(struct hostapd_iface *iface)
 {
 	int i;
 	enum hostapd_hw_mode target_mode;
 
 	if (iface->current_mode ||
 	    iface->conf->hw_mode != HOSTAPD_MODE_IEEE80211ANY)
-		return;
+		return 0;
 
 	if (iface->freq < 4000)
 		target_mode = HOSTAPD_MODE_IEEE80211G;
@@ -1035,14 +1053,20 @@ static void hostapd_determine_mode(struct hostapd_iface *iface)
 
 		mode = &iface->hw_features[i];
 		if (mode->mode == target_mode) {
+			if (skip_mode(iface, mode))
+				continue;
+
 			iface->current_mode = mode;
 			iface->conf->hw_mode = mode->mode;
 			break;
 		}
 	}
 
-	if (!iface->current_mode)
-		wpa_printf(MSG_ERROR, "ACS: Cannot decide mode");
+	if (!iface->current_mode) {
+		wpa_printf(MSG_ERROR, "ACS/CSA: Cannot decide mode");
+		return -1;
+	}
+	return 0;
 }
 
 
@@ -1136,6 +1160,25 @@ out:
 
 
 /**
+ * hostapd_csa_update_hwmode - Update hardware mode
+ * @iface: Pointer to interface data.
+ * Returns: 0 on success, < 0 on failure
+ *
+ * Update hardware mode when the operating channel changed because of CSA.
+ */
+int hostapd_csa_update_hwmode(struct hostapd_iface *iface)
+{
+	if (!iface || !iface->conf)
+		return -1;
+
+	iface->current_mode = NULL;
+	iface->conf->hw_mode = HOSTAPD_MODE_IEEE80211ANY;
+
+	return hostapd_determine_mode(iface);
+}
+
+
+/**
  * hostapd_select_hw_mode - Select the hardware mode
  * @iface: Pointer to interface data.
  * Returns: 0 on success, < 0 on failure
@@ -1165,11 +1208,9 @@ int hostapd_select_hw_mode(struct hostapd_iface *iface)
 	iface->current_mode = NULL;
 	for (i = 0; i < iface->num_hw_features; i++) {
 		struct hostapd_hw_modes *mode = &iface->hw_features[i];
-		int chan;
 
 		if (mode->mode == iface->conf->hw_mode) {
-			if (iface->freq > 0 &&
-			    !hw_mode_get_channel(mode, iface->freq, &chan))
+			if (skip_mode(iface, mode))
 				continue;
 
 			iface->current_mode = mode;
