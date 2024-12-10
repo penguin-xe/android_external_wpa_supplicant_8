@@ -55,6 +55,7 @@
 #include "hs20.h"
 #include "airtime_policy.h"
 #include "wpa_auth_kay.h"
+#include "hw_features.h"
 
 
 static int hostapd_flush_old_stations(struct hostapd_data *hapd, u16 reason);
@@ -3624,6 +3625,7 @@ static int hostapd_change_config_freq(struct hostapd_data *hapd,
 	if (!channel)
 		return -1;
 
+	hostapd_determine_mode(hapd->iface);
 	mode = hapd->iface->current_mode;
 
 	/* if a pointer to old_params is provided we save previous state */
@@ -3652,6 +3654,7 @@ static int hostapd_change_config_freq(struct hostapd_data *hapd,
 	case 40:
 	case 80:
 	case 160:
+	case 320:
 		conf->ht_capab |= HT_CAP_INFO_SUPP_CHANNEL_WIDTH_SET;
 		break;
 	default:
@@ -3723,6 +3726,9 @@ static int hostapd_fill_csa_settings(struct hostapd_data *hapd,
 		break;
 	case 160:
 		bandwidth = CONF_OPER_CHWIDTH_160MHZ;
+		break;
+	case 320:
+		bandwidth = CONF_OPER_CHWIDTH_320MHZ;
 		break;
 	default:
 		bandwidth = CONF_OPER_CHWIDTH_USE_HT;
